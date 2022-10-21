@@ -1,0 +1,18 @@
+name: 'Check Asset References'
+description: 'GitHub Action: Check Asset References'
+author: 'Robin McCollum'
+inputs:
+  csv:
+    description: 'Relative file path under the repository of a CSV file to check.'
+    required: true
+    default: './activities.csv'
+  magicTasks:
+    description: 'Relative file paths under the repository of tasks that should always be included (seperated by comma).'
+    required: false
+    default: ''
+runs:
+  using: 'node16'
+  main: 'dist/index.js'
+branding:
+  icon: 'check'
+  color: purple
