@@ -103,6 +103,10 @@ export async function run(): Promise<void> {
 
     logGroup(missingMediaFiles, 'Missing media files', true);
     logGroup(unusedMediaFiles, 'Unused media files', false);
+
+    if (missingTaskFiles.size > 0 || missingMediaFiles.size > 0) {
+      core.setFailed(`ubik2/check-references-action failed with missing files`);
+    }
   } catch (err) {
     core.setFailed(`ubik2/check-references-action failed with: ${err}`);
   }
