@@ -23,7 +23,6 @@ jobs:
   validate-assets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
       - id: check-references
         uses: ubik2/check-references-action@0.1.0
         with:
