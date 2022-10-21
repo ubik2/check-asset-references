@@ -8,7 +8,7 @@ function logGroup(files: Set<string>, message: string, isError: boolean) {
   if (files.size > 0) {
     core.startGroup(message);
     for (const filename of files) {
-      isError ? core.error(filename) : core.warning(filename);
+      isError ? core.error(filename) : core.info(filename);
     }
     core.endGroup();
   }
