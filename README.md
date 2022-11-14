@@ -1,6 +1,6 @@
 # Github Action: Check References
 
-A GitHub Action that checks that the JSON files referenced in a CSV exist, and that the medial files referenced in those JSON files exist.
+A GitHub Action that checks that the JSON files referenced in a CSV exist, and that the media files referenced in those JSON files exist.
 
 ## Usage
 
