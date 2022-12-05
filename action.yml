@@ -6,8 +6,16 @@ inputs:
     description: 'Relative file path under the repository of a CSV file to check.'
     required: true
     default: './activities.csv'
-  magicTasks:
+  magic_tasks:
     description: 'Relative file paths under the repository of tasks that should always be included (seperated by comma).'
+    required: false
+    default: ''
+  git_base_sha:
+    description: 'Hash of the commit to use as the initial value when generating a change summary.'
+    required: false
+    default: ''
+  git_head_sha:
+    description: 'Hash of the commit to use as the current value when generating a change summary.'
     required: false
     default: ''
 runs:
