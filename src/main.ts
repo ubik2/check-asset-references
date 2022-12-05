@@ -1,8 +1,14 @@
 import * as core from '@actions/core';
 import * as path from 'path';
-import { parse } from 'csv-parse/sync';
 import fs from 'fs';
 import * as glob from '@actions/glob';
+import { loadActivities, generateDiff, Table, generateActivityDiff } from './diff';
+
+// git diff 5f92d0ba63f6031189e16c87d591a9500701b523...2f3be3b6145ab7099db73e727bf4b02696292f66
+// git show 5f92d0ba63f6031189e16c87d591a9500701b523:activities.csv
+// use child-process to exec git commands
+// https://github.com/sergeyt/parse-diff
+// write markdown report to $GITHUB_STEP_SUMMARY
 
 function logGroup(files: Set<string>, message: string, isError: boolean) {
   if (files.size > 0) {
@@ -14,13 +20,8 @@ function logGroup(files: Set<string>, message: string, isError: boolean) {
   }
 }
 
-function getReferencedTaskFiles(csvFile: string): Set<string> {
+function getReferencedTaskFiles(records: Table): Set<string> {
   const files = new Set<string>();
-  const fileContents = fs.readFileSync(csvFile, 'utf-8');
-  const records: { [id: string]: string }[] = parse(fileContents, {
-    columns: true,
-    skip_empty_lines: true,
-  });
   for (let i = 0; i < records.length; i++) {
     const record: { [id: string]: string } = records[i];
     if ('Action Link' in record && record['Action Link']) {
@@ -73,15 +74,28 @@ export async function run(): Promise<void> {
   try {
     const githubWorkspace = process.env.GITHUB_WORKSPACE;
     const csvPath = core.getInput('csv', { required: true });
-    const magicTasks = core.getInput('magicTasks');
+    const magicTasks = core.getInput('magic_tasks');
+    const gitBaseSha = core.getInput('git_base_sha');
+    const gitHeadSha = core.getInput('git_head_sha');
     if (!githubWorkspace) {
       throw new Error(`$GITHUB_WORKSPACE is not set`);
     }
     const absoluteRoot = path.resolve(githubWorkspace);
-    const absoluteCsvPath = path.join(absoluteRoot, core.toPlatformPath(csvPath));
+    const csvPlatformPath = core.toPlatformPath(csvPath);
+    const baseActivities = gitBaseSha
+      ? await loadActivities(absoluteRoot, csvPlatformPath, gitBaseSha)
+      : undefined;
 
+    if (gitBaseSha && gitHeadSha) {
+      await generateDiff(absoluteRoot, gitBaseSha, gitHeadSha);
+    }
+
+    const headActivities = await loadActivities(absoluteRoot, csvPlatformPath);
+    if (baseActivities) {
+      console.log(generateActivityDiff(baseActivities, headActivities));
+    }
     const taskFiles = await getTaskFiles(absoluteRoot);
-    const usedTaskFiles = getReferencedTaskFiles(absoluteCsvPath);
+    const usedTaskFiles = getReferencedTaskFiles(headActivities);
     for (const element of magicTasks.split(',')) {
       if (element) {
         usedTaskFiles.add(element);
