@@ -17,17 +17,24 @@ interface TableDiff {
 }
 
 const markdownReplacements: [RegExp, string][] = [
-  [/\*/g, '\\*'],
-  [/#/g, '\\#'],
   [/\//g, '\\/'],
-  [/\(/g, '\\('],
-  [/\)/g, '\\)'],
+  [/`/g, '\\`'],
+  [/\*/g, '\\*'],
+  [/_/g, '\\_'],
+  [/\{/g, '\\{'],
+  [/\}/g, '\\}'],
   [/\[/g, '\\['],
   [/\]/g, '\\]'],
   [/</g, '&lt;'],
   [/>/g, '&gt;'],
-  [/_/g, '\\_'],
-  [/`/g, '\\`'],
+  [/\(/g, '\\('],
+  [/\)/g, '\\)'],
+  [/#/g, '\\#'],
+  [/\+/g, '\\+'],
+  [/-/g, '\\-'],
+  [/\./g, '\\.'],
+  [/!/g, '\\!'],
+  [/\|/g, '\\|'],
 ];
 
 function markdownEscape(text: string): string {
@@ -120,21 +127,21 @@ async function generateActivityDiff(
     chunks.push('### New activities\n');
     for (const [uuid, row] of Object.entries(result.added)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]${getLogicFlagsString(row)}\n`);
     }
   }
   if (Object.keys(result.removed).length > 0) {
     chunks.push('### Removed activities\n');
     for (const [uuid, row] of Object.entries(result.removed)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]${getLogicFlagsString(row)}\n`);
     }
   }
   if (Object.keys(result.modified).length > 0) {
     chunks.push('### Modified activities\n');
     for (const [uuid, [rowA, rowB]] of Object.entries(result.modified)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]${getLogicFlagsString(rowB)}\n`);
       const taskFile =
         'Action Link' in taskTableB[uuid] ? taskTableB[uuid]['Action Link'] : undefined;
       getModifiedColumns(rowA, rowB).forEach((column) => {
@@ -191,6 +198,50 @@ function getTaskTable(table: Table): TaskTable {
     }
   });
   return taskTable;
+}
+
+function isDevCheck(obj: { [key: string]: any }) {
+  const serverEnvVar1 = JSON.stringify({ '==': ['dev', { var: 'server.env' }] });
+  const serverEnvVar2 = JSON.stringify({ '==': [{ var: 'server.env' }, 'dev'] });
+  const objStr = JSON.stringify(obj);
+  return objStr === serverEnvVar1 || objStr === serverEnvVar2;
+}
+
+function getLogicFlags(row: Row): string | null {
+  if ('JsonLogic' in row) {
+    const jsonLogic = row['JsonLogic'];
+    if (jsonLogic.trim() === '') {
+      return null;
+    }
+    try {
+      const jsonLogicObj = JSON.parse(jsonLogic);
+      console.log(jsonLogicObj);
+      if (!jsonLogicObj) {
+        return 'disabled';
+      }
+      if (isDevCheck(jsonLogicObj)) {
+        return 'dev only';
+      }
+      // Check to see if we have an "and" check that contains a top level dev check
+      if ('and' in jsonLogicObj) {
+        const args = jsonLogicObj['and'];
+        if (Array.isArray(args)) {
+          if (args.reduce((status, obj) => status == status || isDevCheck(obj), false)) {
+            return 'dev only';
+          }
+        }
+        return null;
+      }
+    } catch (e) {
+      // Invalid jsonlogic is another problem, but we don't deal with it here
+    }
+  }
+  return null;
+}
+
+function getLogicFlagsString(row: Row): string {
+  const logicStatus = getLogicFlags(row);
+  return logicStatus != null ? ` (${logicStatus})` : '';
 }
 
 function getActivityChanges(
