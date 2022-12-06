@@ -59,7 +59,6 @@ async function generateDiff(
   const childProcess = spawn('git', ['diff', `${gitBaseSha}...${gitHeadSha}`], { cwd: workspace });
   const fileContents = await streamToBuffer(childProcess.stdout);
   const files = parseDiff(fileContents.toString());
-  console.log(files);
   return files;
 }
 
@@ -161,7 +160,7 @@ async function generateActivityDiff(
         if (taskFile in usedMediaFileReferences) {
           [...usedMediaFileReferences[taskFile]].forEach((mediaFile) => {
             if (hasModifiedFile(mediaFile, diffResult)) {
-              chunks.push(`   - **Media ${taskFile}** changed\n`);
+              chunks.push(`   - **Media ${mediaFile}** changed\n`);
             }
           });
         }
