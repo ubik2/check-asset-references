@@ -98,7 +98,7 @@ export async function run(): Promise<void> {
         console.log(`$GITHUB_STEP_SUMMARY is not set`);
         console.log(activityDiffMarkdown);
       }
-      core.summary.addRaw(activityDiffMarkdown).write();
+      await core.summary.addRaw(activityDiffMarkdown).write();
     }
     const taskFiles = await getTaskFiles(absoluteRoot);
     const usedTaskFiles = getReferencedTaskFiles(headActivities);
