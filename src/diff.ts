@@ -20,6 +20,24 @@ interface TableDiff {
   modified: { [id: string]: [Row, Row] };
 }
 
+const markdownReplacements: [RegExp, string][] = [
+  [/\*/g, '\\*'],
+  [/#/g, '\\#'],
+  [/\//g, '\\/'],
+  [/\(/g, '\\('],
+  [/\)/g, '\\)'],
+  [/\[/g, '\\['],
+  [/\]/g, '\\]'],
+  [/</g, '&lt;'],
+  [/>/g, '&gt;'],
+  [/_/g, '\\_'],
+  [/`/g, '\\`'],
+];
+
+function markdownEscape(text: string): string {
+  return markdownReplacements.reduce((str, pair) => str.replace(pair[0], pair[1]), text);
+}
+
 async function streamToBuffer(stream: Stream): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,44 +95,58 @@ async function loadActivities(
 }
 
 // For now, we don't do anything for newly introduced or removed columns
+// We also need to ignore newline changes, since git show and file access may use different conventions
 function getModifiedColumns(a: Row, b: Row): string[] {
   const columns = setUnion(new Set(Object.keys(a)), new Set(Object.keys(b)));
-  return [...columns].filter((column) =>
-    column in a && column in b ? a[column] != b[column] : false,
+  const modifiedColumns = [...columns].filter(
+    (column) =>
+      column in a &&
+      column in b &&
+      a[column] !== b[column] &&
+      a[column].replace(/\r\n/g, '\n') !== b[column].replace(/\r\n/g, '\n'),
   );
+  return modifiedColumns;
 }
 
 function generateActivityDiff(a: Table, b: Table): string {
   const chunks: string[] = [];
   const result = getActivityChanges(a, b);
+  const tooltips: string[] = [];
   if (Object.keys(result.added).length > 0) {
     chunks.push('### New activities\n');
     for (const [uuid, row] of Object.entries(result.added)) {
-      const title = 'Title' in row ? row['Title'] : 'missing title';
-      chunks.push(` - [${title}](# ${uuid})\n`);
+      tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
+      const title = 'Title' in row ? markdownEscape(row['Title']) : 'missing title';
+      chunks.push(` - [${title}][${uuid}]\n`);
     }
   }
   if (Object.keys(result.removed).length > 0) {
     chunks.push('### Removed activities\n');
     for (const [uuid, row] of Object.entries(result.removed)) {
-      const title = 'Title' in row ? row['Title'] : 'missing title';
-      chunks.push(` - [${title}](# ${uuid})\n`);
+      tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
+      const title = 'Title' in row ? markdownEscape(row['Title']) : 'missing title';
+      chunks.push(` - [${title}][${uuid}]\n`);
     }
   }
   if (Object.keys(result.modified).length > 0) {
     chunks.push('### Modified activities\n');
     for (const [uuid, [rowA, rowB]] of Object.entries(result.modified)) {
-      const title = 'Title' in rowB ? rowB['Title'] : 'missing title';
-      chunks.push(` - [${title}](# ${uuid})\n`);
+      tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
+      const title = 'Title' in rowB ? markdownEscape(rowB['Title']) : 'missing title';
+      chunks.push(` - [${title}][${uuid}]\n`);
       // TODO: Also add check for changed json or changed video
-      for (const column in getModifiedColumns(rowA, rowB)) {
-        const aValue = column in rowA ? '(null)' : rowA[column];
-        const bValue = column in rowB ? '(null)' : rowB[column];
-        chunks.push(`   - **${column}** changed from "${aValue}" to "${bValue}"\n`);
-      }
+      getModifiedColumns(rowA, rowB).forEach((column) => {
+        const aValue = column in rowA ? markdownEscape(rowA[column]) : '(null)';
+        const bValue = column in rowB ? markdownEscape(rowB[column]) : '(null)';
+        if (aValue.length < 40 && bValue.length < 40) {
+          chunks.push(`   - **${column}** changed from "${aValue}" to "${bValue}"\n`);
+        } else {
+          chunks.push(`   - **${column}** changed\n`);
+        }
+      });
     }
   }
-  return chunks.join();
+  return [tooltips.join(''), chunks.join('')].join('');
 }
 
 function getActivityChanges(a: Table, b: Table): TableDiff {
@@ -130,16 +162,20 @@ function getActivityChanges(a: Table, b: Table): TableDiff {
       bDict[row['UUID']] = row;
     }
   });
-  const aKeys = new Set<string>(Object.keys(a));
-  const bKeys = new Set<string>(Object.keys(b));
+  const aKeys = new Set<string>(Object.keys(aDict));
+  const bKeys = new Set<string>(Object.keys(bDict));
   const added: { [uuid: string]: Row } = {};
   setSubtract(bKeys, aKeys).forEach((key) => (added[key] = bDict[key]));
   const removed: { [uuid: string]: Row } = {};
   setSubtract(aKeys, bKeys).forEach((key) => (removed[key] = aDict[key]));
   const modified: { [uuid: string]: [Row, Row] } = {};
   [...setIntersection(aKeys, bKeys)]
-    .filter((key) => getModifiedColumns(aDict[key], bDict[key]).length > 0)
-    .forEach((key) => (modified[key] = [aDict[key], bDict[key]]));
+    .filter((key) => {
+      return getModifiedColumns(aDict[key], bDict[key]).length > 0;
+    })
+    .forEach((key) => {
+      modified[key] = [aDict[key], bDict[key]];
+    });
   return { added: added, removed: removed, modified: modified };
 }
 

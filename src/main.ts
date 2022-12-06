@@ -73,6 +73,7 @@ function getReferencedMediaFiles(rootDir: string, taskFiles: Set<string>): Set<s
 export async function run(): Promise<void> {
   try {
     const githubWorkspace = process.env.GITHUB_WORKSPACE;
+    const githubStepSummary = process.env.GITHUB_STEP_SUMMARY;
     const csvPath = core.getInput('csv', { required: true });
     const magicTasks = core.getInput('magic_tasks');
     const gitBaseSha = core.getInput('git_base_sha');
@@ -92,7 +93,12 @@ export async function run(): Promise<void> {
 
     const headActivities = await loadActivities(absoluteRoot, csvPlatformPath);
     if (baseActivities) {
-      console.log(generateActivityDiff(baseActivities, headActivities));
+      const activityDiffMarkdown = generateActivityDiff(baseActivities, headActivities);
+      if (!githubStepSummary) {
+        console.log(activityDiffMarkdown);
+      } else {
+        fs.writeFileSync(path.resolve(githubStepSummary), activityDiffMarkdown);
+      }
     }
     const taskFiles = await getTaskFiles(absoluteRoot);
     const usedTaskFiles = getReferencedTaskFiles(headActivities);
