@@ -4,15 +4,11 @@ import { Stream } from 'stream';
 import path from 'path';
 import fs from 'fs';
 import parseDiff from 'parse-diff';
-
-// git diff 5f92d0ba63f6031189e16c87d591a9500701b523...2f3be3b6145ab7099db73e727bf4b02696292f66
-// git show 5f92d0ba63f6031189e16c87d591a9500701b523:activities.csv
-// use child-process to exec git commands
-// https://github.com/sergeyt/parse-diff
-// write markdown report to $GITHUB_STEP_SUMMARY
+import { setSubtract, setUnion, setIntersection } from './set';
 
 type Row = { [id: string]: string };
 type Table = Row[];
+type TaskTable = { [id: string]: Row };
 
 interface TableDiff {
   added: { [id: string]: Row };
@@ -46,20 +42,6 @@ async function streamToBuffer(stream: Stream): Promise<Buffer> {
     stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', (err) => reject(`Error reading stream: ${err}`));
   });
-}
-
-function setSubtract<T>(a: Set<T>, b: Set<T>): Set<T> {
-  return new Set<T>([...a].filter((item) => !b.has(item)));
-}
-
-function setUnion<T>(a: Set<T>, b: Set<T>): Set<T> {
-  const tmp = new Set<T>(a);
-  [...b].forEach((item) => tmp.add(item));
-  return tmp;
-}
-
-function setIntersection<T>(a: Set<T>, b: Set<T>): Set<T> {
-  return new Set<T>([...a].filter((item) => b.has(item)));
 }
 
 async function generateDiff(
@@ -112,9 +94,27 @@ function getEscapedTitle(row: Row): string {
   return 'Title' in row && row['Title'] !== '' ? markdownEscape(row['Title']) : 'missing title';
 }
 
-function generateActivityDiff(a: Table, b: Table): string {
+async function generateActivityDiff(
+  a: Table,
+  b: Table,
+  usedMediaFileReferences: { [taskFile: string]: Set<string> },
+  absoluteRoot: string,
+  gitBaseSha: string,
+  gitHeadSha: string,
+): Promise<string> {
+  let parsedDiffResult: parseDiff.File[] | undefined;
+  if (gitBaseSha && gitHeadSha) {
+    parsedDiffResult = await generateDiff(absoluteRoot, gitBaseSha, gitHeadSha);
+  }
   const chunks: string[] = [];
-  const result = getActivityChanges(a, b);
+  const taskTableA = getTaskTable(a);
+  const taskTableB = getTaskTable(b);
+  const result = getActivityChanges(
+    taskTableA,
+    taskTableB,
+    usedMediaFileReferences,
+    parsedDiffResult,
+  );
   const tooltips: string[] = [];
   if (Object.keys(result.added).length > 0) {
     chunks.push('### New activities\n');
@@ -135,7 +135,8 @@ function generateActivityDiff(a: Table, b: Table): string {
     for (const [uuid, [rowA, rowB]] of Object.entries(result.modified)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
       chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]\n`);
-      // TODO: Also add check for changed json or changed video
+      const taskFile =
+        'Action Link' in taskTableB[uuid] ? taskTableB[uuid]['Action Link'] : undefined;
       getModifiedColumns(rowA, rowB).forEach((column) => {
         const aValue = column in rowA ? markdownEscape(rowA[column]) : '(null)';
         const bValue = column in rowB ? markdownEscape(rowB[column]) : '(null)';
@@ -145,24 +146,59 @@ function generateActivityDiff(a: Table, b: Table): string {
           chunks.push(`   - **${column}** changed\n`);
         }
       });
+      if (taskFile && parsedDiffResult) {
+        const diffResult = parsedDiffResult;
+        if (hasModifiedFile(taskFile, diffResult)) {
+          chunks.push(`   - **Task ${taskFile}** changed\n`);
+        }
+        if (taskFile in usedMediaFileReferences) {
+          [...usedMediaFileReferences[taskFile]].forEach((mediaFile) => {
+            if (hasModifiedFile(mediaFile, diffResult)) {
+              chunks.push(`   - **Media ${taskFile}** changed\n`);
+            }
+          });
+        }
+      }
     }
   }
   return [tooltips.join(''), chunks.join('')].join('');
 }
 
-function getActivityChanges(a: Table, b: Table): TableDiff {
-  const aDict: { [id: string]: Row } = {};
-  a.forEach((row) => {
+function hasModifiedColumns(rowA: Row, rowB: Row) {
+  return getModifiedColumns(rowA, rowB).length > 0;
+}
+
+function hasModifiedFile(filename: string, parsedDiffResult: parseDiff.File[]) {
+  return (
+    parsedDiffResult.findIndex((entry) => entry.from === filename || entry.to == filename) != -1
+  );
+}
+
+function hasModifiedFileInSet(mediaFiles: Set<string>, parsedDiffResult: parseDiff.File[]) {
+  return (
+    parsedDiffResult.findIndex(
+      (entry) =>
+        (entry.from && mediaFiles.has(entry.from)) || (entry.to && mediaFiles.has(entry.to)),
+    ) != -1
+  );
+}
+
+function getTaskTable(table: Table): TaskTable {
+  const taskTable: TaskTable = {};
+  table.forEach((row) => {
     if ('UUID' in row && row['UUID'] !== '') {
-      aDict[row['UUID']] = row;
+      taskTable[row['UUID']] = row;
     }
   });
-  const bDict: { [id: string]: Row } = {};
-  b.forEach((row) => {
-    if ('UUID' in row && row['UUID'] !== '') {
-      bDict[row['UUID']] = row;
-    }
-  });
+  return taskTable;
+}
+
+function getActivityChanges(
+  aDict: TaskTable,
+  bDict: TaskTable,
+  usedMediaFileReferences: { [taskFile: string]: Set<string> },
+  parsedDiffResult: parseDiff.File[] | undefined,
+): TableDiff {
   const aKeys = new Set<string>(Object.keys(aDict));
   const bKeys = new Set<string>(Object.keys(bDict));
   const added: { [uuid: string]: Row } = {};
@@ -172,7 +208,17 @@ function getActivityChanges(a: Table, b: Table): TableDiff {
   const modified: { [uuid: string]: [Row, Row] } = {};
   [...setIntersection(aKeys, bKeys)]
     .filter((key) => {
-      return getModifiedColumns(aDict[key], bDict[key]).length > 0;
+      if (hasModifiedColumns(aDict[key], bDict[key])) {
+        return true;
+      }
+      const taskFile = 'Action Link' in bDict[key] ? bDict[key]['Action Link'] : undefined;
+      if (!taskFile || !parsedDiffResult) {
+        return false;
+      }
+      return (
+        hasModifiedFile(taskFile, parsedDiffResult) ||
+        hasModifiedFileInSet(usedMediaFileReferences[taskFile], parsedDiffResult)
+      );
     })
     .forEach((key) => {
       modified[key] = [aDict[key], bDict[key]];

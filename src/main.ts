@@ -3,6 +3,7 @@ import * as path from 'path';
 import fs from 'fs';
 import * as glob from '@actions/glob';
 import { loadActivities, generateDiff, Table, generateActivityDiff } from './diff';
+import { setIntersection, setSubtract, setUnion } from './set';
 
 // git diff 5f92d0ba63f6031189e16c87d591a9500701b523...2f3be3b6145ab7099db73e727bf4b02696292f66
 // git show 5f92d0ba63f6031189e16c87d591a9500701b523:activities.csv
@@ -33,7 +34,6 @@ function getReferencedTaskFiles(records: Table): Set<string> {
 
 async function getTaskFiles(rootDir: string): Promise<Set<string>> {
   const files = new Set<string>();
-
   const globber = await glob.create(path.join(rootDir, 'tasks/*.json'));
   const matches = await globber.glob();
   for (const file of matches) {
@@ -52,10 +52,14 @@ async function getMediaFiles(rootDir: string): Promise<Set<string>> {
   return files;
 }
 
-function getReferencedMediaFiles(rootDir: string, taskFiles: Set<string>): Set<string> {
-  const files = new Set<string>();
-  for (const file of taskFiles) {
-    const absolutePath = path.join(rootDir, core.toPlatformPath(file));
+function getReferencedMediaFiles(
+  rootDir: string,
+  taskFiles: Set<string>,
+): { [taskFile: string]: Set<string> } {
+  const taskFileReferences: { [taskFile: string]: Set<string> } = {};
+  for (const taskFile of taskFiles) {
+    const files = new Set<string>();
+    const absolutePath = path.join(rootDir, core.toPlatformPath(taskFile));
     const taskInfo = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
     for (let i = 0; i < taskInfo['steps'].length; i++) {
       const step = taskInfo['steps'][i];
@@ -66,8 +70,9 @@ function getReferencedMediaFiles(rootDir: string, taskFiles: Set<string>): Set<s
         files.add(decodeURI(step['audioUrl']));
       }
     }
+    taskFileReferences[taskFile] = files;
   }
-  return files;
+  return taskFileReferences;
 }
 
 export async function run(): Promise<void> {
@@ -92,31 +97,42 @@ export async function run(): Promise<void> {
     }
 
     const headActivities = await loadActivities(absoluteRoot, csvPlatformPath);
+    const taskFiles = await getTaskFiles(absoluteRoot);
+    const usedTaskFiles = getReferencedTaskFiles(headActivities);
+    const taskFilesIntersection = setIntersection(usedTaskFiles, taskFiles);
+    const usedMediaFileReferences = getReferencedMediaFiles(absoluteRoot, taskFilesIntersection);
     if (baseActivities) {
-      const activityDiffMarkdown = generateActivityDiff(baseActivities, headActivities);
+      const activityDiffMarkdown = await generateActivityDiff(
+        baseActivities,
+        headActivities,
+        usedMediaFileReferences,
+        absoluteRoot,
+        gitBaseSha,
+        gitHeadSha,
+      );
       if (!githubStepSummary) {
         console.log(`$GITHUB_STEP_SUMMARY is not set`);
         console.log(activityDiffMarkdown);
       }
       await core.summary.addRaw(activityDiffMarkdown).write();
     }
-    const taskFiles = await getTaskFiles(absoluteRoot);
-    const usedTaskFiles = getReferencedTaskFiles(headActivities);
     for (const element of magicTasks.split(',')) {
       if (element) {
         usedTaskFiles.add(element);
       }
     }
 
-    const missingTaskFiles = new Set([...usedTaskFiles].filter((i) => !taskFiles.has(i)));
-    const unusedTaskFiles = new Set([...taskFiles].filter((i) => !usedTaskFiles.has(i)));
-    const taskFilesIntersection = new Set([...usedTaskFiles].filter((i) => taskFiles.has(i)));
+    const missingTaskFiles = setSubtract(usedTaskFiles, taskFiles);
+    const unusedTaskFiles = setSubtract(taskFiles, usedTaskFiles);
 
     const mediaFiles = await getMediaFiles(absoluteRoot);
-    const usedMediaFiles = getReferencedMediaFiles(absoluteRoot, taskFilesIntersection);
 
-    const missingMediaFiles = new Set([...usedMediaFiles].filter((i) => !mediaFiles.has(i)));
-    const unusedMediaFiles = new Set([...mediaFiles].filter((i) => !usedMediaFiles.has(i)));
+    const usedMediaFiles = Object.values(usedMediaFileReferences).reduce(
+      (accum, current) => setUnion(accum, current),
+      new Set<string>(),
+    );
+    const missingMediaFiles = setSubtract(usedMediaFiles, mediaFiles);
+    const unusedMediaFiles = setSubtract(mediaFiles, usedMediaFiles);
 
     logGroup(missingTaskFiles, 'Missing task files', true);
     logGroup(unusedTaskFiles, 'Unused task files', false);
