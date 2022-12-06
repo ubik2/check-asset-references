@@ -95,10 +95,10 @@ export async function run(): Promise<void> {
     if (baseActivities) {
       const activityDiffMarkdown = generateActivityDiff(baseActivities, headActivities);
       if (!githubStepSummary) {
+        console.log(`$GITHUB_STEP_SUMMARY is not set`);
         console.log(activityDiffMarkdown);
-      } else {
-        fs.writeFileSync(path.resolve(githubStepSummary), activityDiffMarkdown);
       }
+      core.summary.addRaw(activityDiffMarkdown).write();
     }
     const taskFiles = await getTaskFiles(absoluteRoot);
     const usedTaskFiles = getReferencedTaskFiles(headActivities);
