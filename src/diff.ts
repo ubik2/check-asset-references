@@ -108,6 +108,10 @@ function getModifiedColumns(a: Row, b: Row): string[] {
   return modifiedColumns;
 }
 
+function getEscapedTitle(row: Row): string {
+  return 'Title' in row && row['Title'] !== '' ? markdownEscape(row['Title']) : 'missing title';
+}
+
 function generateActivityDiff(a: Table, b: Table): string {
   const chunks: string[] = [];
   const result = getActivityChanges(a, b);
@@ -116,24 +120,21 @@ function generateActivityDiff(a: Table, b: Table): string {
     chunks.push('### New activities\n');
     for (const [uuid, row] of Object.entries(result.added)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      const title = 'Title' in row ? markdownEscape(row['Title']) : 'missing title';
-      chunks.push(` - [${title}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]\n`);
     }
   }
   if (Object.keys(result.removed).length > 0) {
     chunks.push('### Removed activities\n');
     for (const [uuid, row] of Object.entries(result.removed)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      const title = 'Title' in row ? markdownEscape(row['Title']) : 'missing title';
-      chunks.push(` - [${title}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(row)}][${uuid}]\n`);
     }
   }
   if (Object.keys(result.modified).length > 0) {
     chunks.push('### Modified activities\n');
     for (const [uuid, [rowA, rowB]] of Object.entries(result.modified)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      const title = 'Title' in rowB ? markdownEscape(rowB['Title']) : 'missing title';
-      chunks.push(` - [${title}][${uuid}]\n`);
+      chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]\n`);
       // TODO: Also add check for changed json or changed video
       getModifiedColumns(rowA, rowB).forEach((column) => {
         const aValue = column in rowA ? markdownEscape(rowA[column]) : '(null)';
@@ -152,13 +153,13 @@ function generateActivityDiff(a: Table, b: Table): string {
 function getActivityChanges(a: Table, b: Table): TableDiff {
   const aDict: { [id: string]: Row } = {};
   a.forEach((row) => {
-    if ('UUID' in row) {
+    if ('UUID' in row && row['UUID'] !== '') {
       aDict[row['UUID']] = row;
     }
   });
   const bDict: { [id: string]: Row } = {};
   b.forEach((row) => {
-    if ('UUID' in row) {
+    if ('UUID' in row && row['UUID'] !== '') {
       bDict[row['UUID']] = row;
     }
   });
