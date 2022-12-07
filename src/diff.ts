@@ -140,7 +140,7 @@ async function generateActivityDiff(
     chunks.push('### Modified activities\n');
     for (const [uuid, [rowA, rowB]] of Object.entries(result.modified)) {
       tooltips.push(`[${uuid}]: ## "${uuid}"\n`);
-      chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]${getLogicFlagsString(rowB)}\n`);
+      chunks.push(` - [${getEscapedTitle(rowB)}][${uuid}]${getLogicFlagsString(rowA, rowB)}\n`);
       const taskFile =
         'Action Link' in taskTableB[uuid] ? taskTableB[uuid]['Action Link'] : undefined;
       getModifiedColumns(rowA, rowB).forEach((column) => {
@@ -199,6 +199,7 @@ function getTaskTable(table: Table): TaskTable {
   return taskTable;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isDevCheck(obj: { [key: string]: any }) {
   const serverEnvVar1 = JSON.stringify({ '==': ['dev', { var: 'server.env' }] });
   const serverEnvVar2 = JSON.stringify({ '==': [{ var: 'server.env' }, 'dev'] });
@@ -238,9 +239,23 @@ function getLogicFlags(row: Row): string | null {
   return null;
 }
 
-function getLogicFlagsString(row: Row): string {
-  const logicStatus = getLogicFlags(row);
-  return logicStatus != null ? ` (${logicStatus})` : '';
+function getLogicFlagsString(row: Row, newRow?: Row): string {
+  if (newRow) {
+    const logicStatusA = getLogicFlags(row);
+    const logicStatusB = getLogicFlags(newRow);
+    if (logicStatusA === logicStatusB) {
+      return logicStatusB != null ? ` (${logicStatusB})` : '';
+    } else if (logicStatusA == null) {
+      return ` (changed to ${logicStatusB})`;
+    } else if (logicStatusB == null) {
+      return ` (changed from ${logicStatusA})`;
+    } else {
+      return ` (changed from ${logicStatusA} to ${logicStatusB})`;
+    }
+  } else {
+    const logicStatus = getLogicFlags(row);
+    return logicStatus != null ? ` (${logicStatus})` : '';
+  }
 }
 
 function getActivityChanges(

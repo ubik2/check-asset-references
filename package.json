@@ -1,6 +1,6 @@
 {
   "name": "check-references-action",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "A Github action for checking the references are all valid",
   "main": "dist/index.js",
