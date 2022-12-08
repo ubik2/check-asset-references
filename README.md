@@ -7,8 +7,9 @@ A GitHub Action that checks that the JSON files referenced in a CSV exist, and t
 ### Inputs
 
 - `csv`: Relative file path under the repository of the CSV file to check for task references. Default is: `'./activities.csv'`.
-- `magicTasks`: One or more relative file paths under the repository (seperated by comma) of the JSON files to validate with the schema provided.
-
+- `magic_tasks`: One or more relative file paths under the repository (seperated by comma) of the JSON files to validate with the schema provided.
+- `git_base_sha`: Optional git hash indicating the base of a pull request.
+- `git_head_sha`: Optional git hash indicating the head of a pull request.
 
 ### Example Workflow
 
@@ -27,5 +28,5 @@ jobs:
         uses: ubik2/check-references-action@0.1.0
         with:
           csv: articles.csv
-          magicTasks: tasks/activity_set_step_goal.json,tasks/permission_sleeps.json,tasks/permission_steps.json,tasks/profile_licenses.json
+          magic_tasks: tasks/activity_set_step_goal.json,tasks/permission_sleeps.json,tasks/permission_steps.json,tasks/profile_licenses.json
 ```
