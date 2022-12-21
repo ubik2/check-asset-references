@@ -2,10 +2,14 @@ name: 'Check Asset References'
 description: 'GitHub Action: Check Asset References'
 author: 'Robin McCollum'
 inputs:
-  csv:
-    description: 'Relative file path under the repository of a CSV file to check.'
+  activities_csv:
+    description: 'Relative file path under the repository of a CSV file with activities to check.'
     required: true
     default: './activities.csv'
+  articles_csv:
+    description: 'Relative file path under the repository of a CSV file with articles to check.'
+    required: true
+    default: './articles.csv'
   magic_tasks:
     description: 'Relative file paths under the repository of tasks that should always be included (seperated by comma).'
     required: false
