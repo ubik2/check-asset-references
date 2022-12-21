@@ -67,14 +67,22 @@ async function loadActivities(
   csvPlatformPath: string,
   gitSha?: string,
 ): Promise<Table> {
-  let fileContents;
   if (typeof gitSha !== 'undefined') {
     const childProcess = spawn('git', ['show', `${gitSha}:${csvPlatformPath}`], { cwd: workspace });
-    fileContents = await streamToBuffer(childProcess.stdout);
+    const fileContents = await streamToBuffer(childProcess.stdout);
+    const records: Table = parse(fileContents, {
+      columns: true,
+      skip_empty_lines: true,
+    });
+    return records;
   } else {
-    const absoluteCsvPath = path.join(workspace, csvPlatformPath);
-    fileContents = fs.readFileSync(absoluteCsvPath, 'utf-8');
+    return await loadCsv(workspace, csvPlatformPath);
   }
+}
+
+async function loadCsv(workspace: string, csvPlatformPath: string): Promise<Table> {
+  const absoluteCsvPath = path.join(workspace, csvPlatformPath);
+  const fileContents = fs.readFileSync(absoluteCsvPath, 'utf-8');
   const records: Table = parse(fileContents, {
     columns: true,
     skip_empty_lines: true,
@@ -291,4 +299,4 @@ function getActivityChanges(
   return { added: added, removed: removed, modified: modified };
 }
 
-export { generateDiff, loadActivities, generateActivityDiff, Table };
+export { generateDiff, loadActivities, loadCsv, generateActivityDiff, Table };

@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import fs from 'fs';
 import * as glob from '@actions/glob';
-import { loadActivities, generateDiff, Table, generateActivityDiff } from './diff';
+import { loadActivities, loadCsv, generateDiff, Table, generateActivityDiff } from './diff';
 import { setIntersection, setSubtract, setUnion } from './set';
 
 // git diff 5f92d0ba63f6031189e16c87d591a9500701b523...2f3be3b6145ab7099db73e727bf4b02696292f66
@@ -21,30 +21,20 @@ function logGroup(files: Set<string>, message: string, isError: boolean) {
   }
 }
 
-function getReferencedTaskFiles(records: Table): Set<string> {
+function getReferencedFiles(records: Table, key: string): Set<string> {
   const files = new Set<string>();
   for (let i = 0; i < records.length; i++) {
     const record: { [id: string]: string } = records[i];
-    if ('Action Link' in record && record['Action Link']) {
-      files.add(record['Action Link']);
+    if (key in record && record[key]) {
+      files.add(decodeURIComponent(record[key]));
     }
   }
   return files;
 }
 
-async function getTaskFiles(rootDir: string): Promise<Set<string>> {
+async function getFiles(rootDir: string, globPattern: string): Promise<Set<string>> {
   const files = new Set<string>();
-  const globber = await glob.create(path.join(rootDir, 'tasks/*.json'));
-  const matches = await globber.glob();
-  for (const file of matches) {
-    files.add(core.toPosixPath(path.relative(rootDir, file)));
-  }
-  return files;
-}
-
-async function getMediaFiles(rootDir: string): Promise<Set<string>> {
-  const files = new Set<string>();
-  const globber = await glob.create(path.join(rootDir, 'video/*'));
+  const globber = await glob.create(path.join(rootDir, globPattern));
   const matches = await globber.glob();
   for (const file of matches) {
     files.add(core.toPosixPath(path.relative(rootDir, file)));
@@ -79,7 +69,8 @@ export async function run(): Promise<void> {
   try {
     const githubWorkspace = process.env.GITHUB_WORKSPACE;
     const githubStepSummary = process.env.GITHUB_STEP_SUMMARY;
-    const csvPath = core.getInput('csv', { required: true });
+    const csvActivitiesPath = core.getInput('activities_csv', { required: true });
+    const csvArticlesPath = core.getInput('articles_csv', { required: true });
     const magicTasks = core.getInput('magic_tasks');
     const gitBaseSha = core.getInput('git_base_sha');
     const gitHeadSha = core.getInput('git_head_sha');
@@ -87,20 +78,25 @@ export async function run(): Promise<void> {
       throw new Error(`$GITHUB_WORKSPACE is not set`);
     }
     const absoluteRoot = path.resolve(githubWorkspace);
-    const csvPlatformPath = core.toPlatformPath(csvPath);
+    const csvActivitiesPlatformPath = core.toPlatformPath(csvActivitiesPath);
+    const csvArticlesPlatformPath = core.toPlatformPath(csvArticlesPath);
     const baseActivities = gitBaseSha
-      ? await loadActivities(absoluteRoot, csvPlatformPath, gitBaseSha)
+      ? await loadActivities(absoluteRoot, csvActivitiesPlatformPath, gitBaseSha)
       : undefined;
 
     if (gitBaseSha && gitHeadSha) {
       await generateDiff(absoluteRoot, gitBaseSha, gitHeadSha);
     }
 
-    const headActivities = await loadActivities(absoluteRoot, csvPlatformPath);
-    const taskFiles = await getTaskFiles(absoluteRoot);
-    const usedTaskFiles = getReferencedTaskFiles(headActivities);
+    const headActivities = await loadActivities(absoluteRoot, csvActivitiesPlatformPath);
+    const taskFiles = await getFiles(absoluteRoot, 'tasks/*.json');
+    const usedTaskFiles = getReferencedFiles(headActivities, 'Action Link');
     const taskFilesIntersection = setIntersection(usedTaskFiles, taskFiles);
     const usedMediaFileReferences = getReferencedMediaFiles(absoluteRoot, taskFilesIntersection);
+    const headArticles = await loadCsv(absoluteRoot, csvArticlesPlatformPath);
+    const articleFiles = await getFiles(absoluteRoot, 'articles/*.html');
+    const usedArticleFiles = getReferencedFiles(headArticles, 'Article Link');
+
     if (baseActivities) {
       const activityDiffMarkdown = await generateActivityDiff(
         baseActivities,
@@ -125,7 +121,7 @@ export async function run(): Promise<void> {
     const missingTaskFiles = setSubtract(usedTaskFiles, taskFiles);
     const unusedTaskFiles = setSubtract(taskFiles, usedTaskFiles);
 
-    const mediaFiles = await getMediaFiles(absoluteRoot);
+    const mediaFiles = await getFiles(absoluteRoot, 'video/*');
 
     const usedMediaFiles = Object.values(usedMediaFileReferences).reduce(
       (accum, current) => setUnion(accum, current),
@@ -134,11 +130,17 @@ export async function run(): Promise<void> {
     const missingMediaFiles = setSubtract(usedMediaFiles, mediaFiles);
     const unusedMediaFiles = setSubtract(mediaFiles, usedMediaFiles);
 
+    const missingArticleFiles = setSubtract(usedArticleFiles, articleFiles);
+    const unusedArticleFiles = setSubtract(articleFiles, usedArticleFiles);
+
     logGroup(missingTaskFiles, 'Missing task files', true);
     logGroup(unusedTaskFiles, 'Unused task files', false);
 
     logGroup(missingMediaFiles, 'Missing media files', true);
     logGroup(unusedMediaFiles, 'Unused media files', false);
+
+    logGroup(missingArticleFiles, 'Missing article files', true);
+    logGroup(unusedArticleFiles, 'Unused article files', false);
 
     if (missingTaskFiles.size > 0 || missingMediaFiles.size > 0) {
       core.setFailed(`ubik2/check-references-action failed with missing files`);
